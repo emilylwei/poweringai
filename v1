@@ -1,0 +1,23 @@
+powering-ai/
+│
+├── README.md
+├── requirements.txt
+├── .gitignore
+│
+├── data/
+│   ├── raw/
+│   └── processed/
+│
+├── src/
+│   ├── eia.py
+│   ├── clean.py
+│   ├── metrics.py
+│   └── scoring.py
+│
+├── app/
+│   └── streamlit_app.py
+│
+├── notebooks/
+│   └── exploration.ipynb
+│
+└── tests/
