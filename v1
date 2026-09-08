@@ -1,23 +1,72 @@
-powering-ai/
-│
-├── README.md
-├── requirements.txt
-├── .gitignore
-│
-├── data/
-│   ├── raw/
-│   └── processed/
-│
-├── src/
-│   ├── eia.py
-│   ├── clean.py
-│   ├── metrics.py
-│   └── scoring.py
-│
-├── app/
-│   └── streamlit_app.py
-│
-├── notebooks/
-│   └── exploration.ipynb
-│
-└── tests/
+"""Download a small hourly ERCOT electricity-demand sample from the EIA API."""
+
+from pathlib import Path
+import json
+import os
+
+import pandas as pd
+import requests
+from dotenv import load_dotenv
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+RAW_DIR = PROJECT_ROOT / "data" / "raw"
+PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
+API_URL = "https://api.eia.gov/v2/electricity/rto/region-data/data/"
+
+
+def main() -> None:
+    """Fetch six hourly observations and save raw JSON plus a processed CSV."""
+    load_dotenv(PROJECT_ROOT / ".env")
+
+    api_key = os.getenv("EIA_API_KEY")
+    if not api_key or api_key == "your_eia_api_key_here":
+        raise RuntimeError(
+            "Missing EIA_API_KEY. Copy .env.example to .env and add your key locally."
+        )
+
+    params = {
+        "api_key": api_key,
+        "frequency": "hourly",
+        "data[0]": "value",
+        "facets[respondent][]": "ERCO",
+        "facets[type][]": "D",
+        "start": "2024-01-01T00",
+        "end": "2024-01-01T05",
+        "sort[0][column]": "period",
+        "sort[0][direction]": "asc",
+        "offset": 0,
+        "length": 6,
+    }
+
+    try:
+        response = requests.get(API_URL, params=params, timeout=30)
+        response.raise_for_status()
+    except requests.RequestException:
+        raise RuntimeError(
+            "The EIA request failed. Check your network connection and API key."
+        ) from None
+
+    payload = response.json()
+    rows = payload.get("response", {}).get("data", [])
+
+    if not rows:
+        raise RuntimeError("The EIA API returned no demand rows for the test window.")
+
+    RAW_DIR.mkdir(parents=True, exist_ok=True)
+    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
+
+    (RAW_DIR / "ercot_demand_sample.json").write_text(
+        json.dumps(payload, indent=2),
+        encoding="utf-8",
+    )
+
+    demand = pd.DataFrame(rows)
+    output_path = PROCESSED_DIR / "ercot_demand_sample.csv"
+    demand.to_csv(output_path, index=False)
+
+    print(f"Saved {len(demand)} observations to {output_path}")
+
+
+if __name__ == "__main__":
+    main()
