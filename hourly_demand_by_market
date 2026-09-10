@@ -1,4 +1,4 @@
-"""Create a line chart of hourly electricity demand by market."""
+"""Create a line chart of monthly average hourly demand by market."""
 
 from pathlib import Path
 
@@ -8,21 +8,23 @@ import pandas as pd
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "hourly_demand_sample.csv"
-OUTPUT_PATH = PROJECT_ROOT / "figures" / "hourly_demand_by_market.png"
+OUTPUT_PATH = PROJECT_ROOT / "figures" / "monthly_average_demand_by_market.png"
 
 
 def main() -> None:
-    """Read hourly demand data and save one line chart."""
+    """Read hourly demand data, aggregate monthly averages, and save one chart."""
     df = pd.read_csv(INPUT_PATH)
     df["period"] = pd.to_datetime(df["period"])
+    df["month"] = df["period"].dt.to_period("M").dt.to_timestamp()
+    monthly_demand = df.groupby(["month", "market"], as_index=False)["value"].mean()
 
     fig, ax = plt.subplots(figsize=(10, 5))
-    for market_name, market_df in df.groupby("market"):
-        ax.plot(market_df["period"], market_df["value"], label=market_name)
+    for market_name, market_df in monthly_demand.groupby("market"):
+        ax.plot(market_df["month"], market_df["value"], label=market_name)
 
     ax.set_xlabel("Date and hour")
     ax.set_ylabel("Hourly electricity demand (MWh)")
-    ax.set_title("Hourly Electricity Demand by Market")
+    ax.set_title("Monthly Average Hourly Electricity Demand by Market")
     ax.legend(title="Market")
     fig.text(
         0.5,
