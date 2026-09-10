@@ -1,1 +1,40 @@
+"""Create a bar chart of average hourly electricity demand by market."""
 
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import pandas as pd
+
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "hourly_demand_sample.csv"
+OUTPUT_PATH = PROJECT_ROOT / "figures" / "average_demand_by_market.png"
+
+
+def main() -> None:
+    """Read demand data, calculate market averages, and save one chart."""
+    df = pd.read_csv(INPUT_PATH)
+    average_demand = df.groupby("market")["value"].mean().sort_values(ascending=False)
+
+    fig, ax = plt.subplots(figsize=(8, 5))
+    average_demand.plot(kind="bar", ax=ax)
+    ax.set_xlabel("Market")
+    ax.set_ylabel("Average hourly demand (MWh)")
+    ax.set_title("Average Hourly Electricity Demand by Market")
+    ax.tick_params(axis="x", rotation=0)
+    fig.text(
+        0.5,
+        0.01,
+        "Absolute demand reflects market size and does not measure available capacity.",
+        ha="center",
+        fontsize=9,
+    )
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
+
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(OUTPUT_PATH, dpi=150)
+    plt.close(fig)
+
+
+if __name__ == "__main__":
+    main()
