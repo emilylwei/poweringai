@@ -1,102 +1,39 @@
-"""Download a small hourly ERCOT electricity-demand sample from the EIA API."""
+"""Create a bar chart of average hourly electricity demand by market."""
 
 from pathlib import Path
-import json
-import os
 
+import matplotlib.pyplot as plt
 import pandas as pd
-import requests
-from dotenv import load_dotenv
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
-RAW_DIR = PROJECT_ROOT / "data" / "raw"
-PROCESSED_DIR = PROJECT_ROOT / "data" / "processed"
-API_URL = "https://api.eia.gov/v2/electricity/rto/region-data/data/"
-
-
-def get_eia_demand(respondent_code: str, api_key: str) -> pd.DataFrame:
-    """Fetch all 2025 hourly observations for the requested respondent."""
-    batch_size = 5000
-    offset = 0
-    all_rows = []
-    last_payload = None
-
-    params = {
-        "api_key": api_key,
-        "frequency": "hourly",
-        "data[0]": "value",
-        "facets[respondent][]": respondent_code,
-        "facets[type][]": "D",
-        "start": "2025-01-01T00",
-        "end": "2025-12-31T23",
-        "sort[0][column]": "period",
-        "sort[0][direction]": "asc",
-        "offset": offset,
-        "length": batch_size,
-    }
-
-    while True:
-        try:
-            response = requests.get(API_URL, params=params, timeout=30)
-            response.raise_for_status()
-        except requests.RequestException as exc:
-            raise RuntimeError("The EIA request failed. Check your network connection and API key.") from None
-
-        last_payload = response.json()
-        response_data = last_payload.get("response", {})
-        rows = response_data.get("data", [])
-        if not rows:
-            break
-
-        all_rows.extend(rows)
-        offset += len(rows)
-        if offset >= int(response_data.get("total", offset)) or len(rows) < batch_size:
-            break
-        params["offset"] = offset
-
-    if not all_rows:
-        raise RuntimeError("The EIA API returned no demand rows for the requested year.")
-
-    RAW_DIR.mkdir(parents=True, exist_ok=True)
-    PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
-    (RAW_DIR / "ercot_demand_sample.json").write_text(
-        json.dumps(last_payload, indent=2), encoding="utf-8"
-    )
-
-    df = pd.DataFrame(all_rows)
-    df["period"] = pd.to_datetime(df["period"])
-    df["value"] = pd.to_numeric(df["value"])
-    return df
+INPUT_PATH = PROJECT_ROOT / "data" / "processed" / "hourly_demand_sample.csv"
+OUTPUT_PATH = PROJECT_ROOT / "figures" / "average_demand_by_market.png"
 
 
 def main() -> None:
-    """Load the API key and fetch the ERCOT weekly demand file."""
-    MARKETS = {
-        "ERCO": "ERCOT",
-        "PJM": "PJM",
-        "CISO": "CAISO",
-        "MISO": "MISO",
-        "SWPP": "SPP",
-    }
+    """Read demand data, calculate market averages, and save one chart."""
+    df = pd.read_csv(INPUT_PATH)
+    average_demand = df.groupby("market")["value"].mean().sort_values(ascending=False)
 
-    load_dotenv(PROJECT_ROOT / ".env")
-    api_key = os.getenv("EIA_API_KEY")
-    if not api_key or api_key == "your_eia_api_key_here":
-        raise RuntimeError(
-            "Missing EIA_API_KEY. Copy .env.example to .env and add your key locally."
-        )
+    fig, ax = plt.subplots(figsize=(8, 5))
+    average_demand.plot(kind="bar", ax=ax)
+    ax.set_xlabel("Market")
+    ax.set_ylabel("Average hourly demand (MWh)")
+    ax.set_title("Average Hourly Electricity Demand by Market")
+    ax.tick_params(axis="x", rotation=0)
+    fig.text(
+        0.5,
+        0.01,
+        "Absolute demand reflects market size and does not measure available capacity.",
+        ha="center",
+        fontsize=9,
+    )
+    fig.tight_layout(rect=(0, 0.06, 1, 1))
 
-    market_data = []
-    for respondent_code, market_name in MARKETS.items():
-        df = get_eia_demand(respondent_code, api_key)
-        df["market"] = market_name
-        market_data.append(df)
-
-    combined_data = pd.concat(market_data, ignore_index=True)
-    output_path = PROCESSED_DIR / "hourly_demand_sample.csv"
-    combined_data.to_csv(output_path, index=False)
-    print(f"Saved {len(combined_data)} observations to {output_path}")
+    OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+    fig.savefig(OUTPUT_PATH, dpi=150)
+    plt.close(fig)
 
 
 if __name__ == "__main__":
