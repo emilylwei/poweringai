@@ -16,38 +16,55 @@ API_URL = "https://api.eia.gov/v2/electricity/rto/region-data/data/"
 
 
 def get_eia_demand(respondent_code: str, api_key: str) -> pd.DataFrame:
-    """Fetch one week of hourly observations for the requested respondent."""
+    """Fetch all 2025 hourly observations for the requested respondent."""
+    batch_size = 5000
+    offset = 0
+    all_rows = []
+    last_payload = None
+
     params = {
         "api_key": api_key,
         "frequency": "hourly",
         "data[0]": "value",
         "facets[respondent][]": respondent_code,
         "facets[type][]": "D",
-        "start": "2024-01-01T00",
-        "end": "2024-01-07T23",
+        "start": "2025-01-01T00",
+        "end": "2025-12-31T23",
         "sort[0][column]": "period",
         "sort[0][direction]": "asc",
-        "offset": 0,
-        "length": 168,
+        "offset": offset,
+        "length": batch_size,
     }
 
-    try:
-        response = requests.get(API_URL, params=params, timeout=30)
-        response.raise_for_status()
-    except requests.RequestException as exc:
-        raise RuntimeError("The EIA request failed. Check your network connection and API key.") from None
-    payload = response.json()
-    rows = payload.get("response", {}).get("data", [])
-    if not rows:
-        raise RuntimeError("The EIA API returned no demand rows for the test window.")
+    while True:
+        try:
+            response = requests.get(API_URL, params=params, timeout=30)
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise RuntimeError("The EIA request failed. Check your network connection and API key.") from None
+
+        last_payload = response.json()
+        response_data = last_payload.get("response", {})
+        rows = response_data.get("data", [])
+        if not rows:
+            break
+
+        all_rows.extend(rows)
+        offset += len(rows)
+        if offset >= int(response_data.get("total", offset)) or len(rows) < batch_size:
+            break
+        params["offset"] = offset
+
+    if not all_rows:
+        raise RuntimeError("The EIA API returned no demand rows for the requested year.")
 
     RAW_DIR.mkdir(parents=True, exist_ok=True)
     PROCESSED_DIR.mkdir(parents=True, exist_ok=True)
     (RAW_DIR / "ercot_demand_sample.json").write_text(
-        json.dumps(payload, indent=2), encoding="utf-8"
+        json.dumps(last_payload, indent=2), encoding="utf-8"
     )
 
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(all_rows)
     df["period"] = pd.to_datetime(df["period"])
     df["value"] = pd.to_numeric(df["value"])
     return df
