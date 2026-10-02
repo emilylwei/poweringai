@@ -1,0 +1,48 @@
+from pathlib import Path
+
+import geopandas as gpd
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PNNL_PATH = PROJECT_ROOT / (
+    "data/raw/pnnl/r0cga-34g05/im3_projected_data_centers_v1.1/"
+    "moderate_growth/moderate_growth_50_market_gravity.geojson"
+)
+
+gdf = gpd.read_file(PNNL_PATH)
+
+print(gdf.head())
+print(gdf.shape)
+print(gdf.columns)
+print(gdf.crs)
+
+print("\nGrowth scenario:")
+print(gdf["growth_scenario"].unique())
+
+print("\nMarket gravity weight:")
+print(gdf["market_gravity_weight"].unique())
+
+print("\nRegions:")
+print(gdf["region"].unique())
+
+print("\nIT power summary:")
+print(gdf["data_center_it_power_mw"].describe())
+
+print("\nSelected columns:")
+print(
+    gdf[
+        [
+            "id",
+            "region",
+            "data_center_it_power_mw",
+            "campus_size_square_ft",
+            "total_cost_million_usd",
+            "weighted_siting_score",
+        ]
+    ].head(10)
+)
+
+print("\nNumber of modeled data centers by state:")
+print(gdf.groupby("region").size().sort_values(ascending=False))
+
+print("\nTotal modeled IT power by state (MW):")
+print(gdf.groupby("region")["data_center_it_power_mw"].sum().sort_values(ascending=False))
