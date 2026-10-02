@@ -1,0 +1,29 @@
+from pathlib import Path
+
+import pandas as pd
+
+
+csv_path = Path(__file__).parent / "data" / "processed" / "hourly_demand_sample.csv"
+df = pd.read_csv(csv_path)
+
+# EIA observations represent energy over a one-hour interval.
+# Dividing MWh by 1 hour gives average demand in MW,
+# so the numerical value is unchanged.
+df["demand_mw"] = df["value"]
+
+average_demand = df.groupby("market")["demand_mw"].mean()
+peak_demand = df.groupby("market")["demand_mw"].max()
+minimum_demand = df.groupby("market")["demand_mw"].min()
+load_factor = average_demand / peak_demand
+
+baseline_metrics = pd.DataFrame({
+    "average_load_mw": average_demand,
+    "peak_load_mw": peak_demand,
+    "minimum_load_mw": minimum_demand,
+    "load_factor": load_factor,
+})
+print(baseline_metrics)
+
+output_path = Path(__file__).parent / "data" / "processed" / "market_baseline_metrics.csv"
+baseline_metrics.to_csv(output_path)
+print(f"\nSaved baseline metrics to {output_path}")
