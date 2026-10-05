@@ -1,0 +1,69 @@
+from pathlib import Path
+
+import geopandas as gpd
+
+# 1. Locate the input and output relative to the project root.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PNNL_PATH = PROJECT_ROOT / (
+    "data/raw/pnnl/r0cga-34g05/im3_projected_data_centers_v1.1/"
+    "moderate_growth/moderate_growth_50_market_gravity.geojson"
+)
+OUTPUT_PATH = PROJECT_ROOT / "data/processed/pnnl_state_market_mapping.csv"
+
+# 2. Read the same modeled-data-center file used by inspect_pnnl.py.
+gdf = gpd.read_file(PNNL_PATH)
+
+# Do not silently drop rows with missing states or undercount missing IT power.
+if gdf[["region", "data_center_it_power_mw"]].isna().any().any():
+    raise ValueError("Missing state or IT power: check the input before aggregating.")
+
+# 3. Count rows and sum modeled IT power for each state.
+# Assumption: one input row represents one modeled data center.
+state_summary = (
+    gdf.groupby("region")
+    .agg(
+        modeled_data_center_count=("region", "size"),
+        total_modeled_it_power_mw=("data_center_it_power_mw", "sum"),
+    )
+    .reset_index()
+)
+
+# 4. Manually allow only clear first-pass associations.
+# These labels are external assumptions, not fields supplied by PNNL.
+# Keys match PNNL's lowercase, underscore-separated region values.
+# PJM explicitly describes coverage of all of NJ, DE, and Washington, D.C.:
+# https://insidelines.pjm.com/cold-weather-alerts-issued-for-sunday-monday/
+# Current territory reference:
+# https://www.pjm.com/about-pjm/who-we-are/territory-served
+# This is a deliberately small allowlist, not a complete market footprint.
+CLEAR_STATE_MARKETS = {
+    "delaware": "PJM",
+    "new_jersey": "PJM",
+    "district_of_columbia": "PJM",
+}
+
+# 5. Flag every state absent from the allowlist instead of guessing.
+# Texas and California are partially covered by ERCOT and CAISO.
+# Other split, unverified, or outside-target states also stay unresolved.
+# No statewide MISO or SPP assignments are assumed in this version.
+state_summary["market"] = (
+    state_summary["region"]
+    .map(CLEAR_STATE_MARKETS)
+    .fillna("NEEDS_GEOGRAPHIC_CHECK")
+)
+state_summary["mapping_status"] = state_summary["market"].map(
+    {
+        "PJM": "clear_first_pass",
+        "NEEDS_GEOGRAPHIC_CHECK": "needs_geographic_check",
+    }
+)
+
+# 6. Sort by modeled IT power, create the output folder, and save the CSV.
+state_summary = state_summary.sort_values(
+    "total_modeled_it_power_mw", ascending=False
+)
+OUTPUT_PATH.parent.mkdir(parents=True, exist_ok=True)
+state_summary.to_csv(OUTPUT_PATH, index=False)
+
+# 7. Print every row and column of the final sorted table.
+print(state_summary.to_string(index=False))
