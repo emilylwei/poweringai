@@ -1,1 +1,103 @@
+from pathlib import Path
+
+import geopandas as gpd
+
+# 1. File locations. The boundary path is a placeholder, not supplied data.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PNNL_PATH = PROJECT_ROOT / (
+    "data/raw/pnnl/r0cga-34g05/im3_projected_data_centers_v1.1/"
+    "moderate_growth/moderate_growth_50_market_gravity.geojson"
+)
+MARKET_BOUNDARY_PATH = PROJECT_ROOT / "data/raw/markets/market_boundaries.geojson"
+TARGET_MARKETS = {"ERCOT", "PJM", "CAISO", "MISO", "SPP"}
+
+# 2. Load and inspect the original geometries.
+# CRS means coordinate reference system: it defines what coordinates mean.
+gdf = gpd.read_file(PNNL_PATH)
+print("PNNL CRS:", gdf.crs)
+print("PNNL geometry types:", gdf.geometry.geom_type.unique())
+print("Number of rows:", len(gdf))
+print("Number of missing geometries:", gdf.geometry.isna().sum())
+
+boundary_exists = MARKET_BOUNDARY_PATH.exists()
+if not boundary_exists:
+    print(f"Market boundary file is not available yet: {MARKET_BOUNDARY_PATH}")
+
+# 3. Keep the site attributes needed for a future join in a separate copy.
+sites = gdf[["id", "region", "data_center_it_power_mw", "geometry"]].copy()
+if sites.empty:
+    raise SystemExit("Stopped: the PNNL file contains no sites.")
+if sites.crs is None:
+    raise SystemExit("Stopped: the source CRS is missing; do not guess it.")
+if sites.geometry.isna().any() or sites.geometry.is_empty.any():
+    raise SystemExit("Stopped: some sites have missing or empty geometries.")
+if not sites.geometry.is_valid.all():
+    raise SystemExit("Stopped: some site geometries are invalid.")
+
+# 4. Validate the modeled facility areas before creating assignment points.
+# A Polygon encloses an area; a Point represents one location.
+if not sites.geometry.geom_type.isin(["Polygon", "MultiPolygon"]).all():
+    raise SystemExit("Stopped: expected facility Polygon or MultiPolygon geometries.")
+print("Number of facility polygons:", len(sites))
+
+# This representative point is an analytical simplification used only to
+# assign each modeled facility to a broad ISO/RTO footprint. It is not an
+# observed facility entrance or electrical interconnection location.
+# Unlike a centroid, representative_point() stays inside its facility area.
+# Work in the original CRS and replace geometry only in the separate copy.
+# Original facility polygons remain in gdf; no source file is written.
+sites = sites.set_geometry(sites.geometry.representative_point())
+print("Number of representative points created:", len(sites))
+
+# 5. Reproject a separate point copy only for longitude/latitude inspection.
+# CRS defines what coordinates mean. EPSG:4326 uses degrees of lon/lat.
+# Keep sites in the original CRS for the future spatial join.
+inspection_sites = sites.to_crs(epsg=4326)
+sites["longitude"] = inspection_sites.geometry.x
+sites["latitude"] = inspection_sites.geometry.y
+print("\nFirst 10 facilities (representative-point coordinates):")
+print(
+    sites[["id", "region", "data_center_it_power_mw", "longitude", "latitude"]]
+    .head(10)
+    .to_string(index=False)
+)
+
+# 6. Stop normally until real market boundary data is supplied.
+if not boundary_exists:
+    print(
+        "Stopped: supply a verified market-boundary file at "
+        f"{MARKET_BOUNDARY_PATH}. Required fields: market and polygon geometry; "
+        "the file must also have a known CRS. No spatial join was performed."
+    )
+    raise SystemExit(0)
+
+# 7. Future boundary loading and validation; no polygons are invented here.
+markets = gpd.read_file(MARKET_BOUNDARY_PATH)
+if "market" not in markets.columns:
+    raise SystemExit("Stopped: boundary file needs a 'market' column.")
+if markets.crs is None:
+    raise SystemExit("Stopped: the market boundary CRS is missing.")
+if markets.empty or not markets["market"].isin(TARGET_MARKETS).all():
+    raise SystemExit("Stopped: boundary rows must name ERCOT, PJM, CAISO, MISO, or SPP.")
+if markets.geometry.isna().any() or markets.geometry.is_empty.any():
+    raise SystemExit("Stopped: market boundaries contain missing or empty geometries.")
+if not markets.geometry.is_valid.all():
+    raise SystemExit("Stopped: market boundaries contain invalid geometries.")
+if not markets.geometry.geom_type.isin(["Polygon", "MultiPolygon"]).all():
+    raise SystemExit("Stopped: market boundaries must be Polygons or MultiPolygons.")
+if set(markets["market"]) != TARGET_MARKETS:
+    raise SystemExit("Stopped: boundary file must include all five target markets.")
+
+# Both GeoDataFrames must use the same CRS to compare their locations.
+markets = markets[["market", "geometry"]].to_crs(sites.crs)
+
+# 8. A point-in-polygon join attaches a market label to each point inside it.
+# A left join retains unmatched sites, with a missing market value.
+# 'within' excludes points exactly on polygon edges; they stay unresolved.
+# Overlapping polygons can produce multiple matches for one site.
+mapped_sites = gpd.sjoin(sites, markets, how="left", predicate="within")
+if mapped_sites.index.duplicated().any():
+    raise SystemExit("Stopped: some sites matched multiple boundary polygons; review overlaps.")
+print("\nSpatial join preview (missing markets remain unresolved):")
+print(mapped_sites.head().to_string(index=False))
 
