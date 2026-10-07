@@ -38,11 +38,13 @@
 - Projected data-center MW + an actual siting methodology to study and critique
 
 
-## *Phase 3 - Connect projected data centers to power markets*
+### Phase 3 boundary-data note
 
-- PNNL gives geographic data-center locations, so we'll need to map each projected facility to its power-market geography
-- This is a geospatial join:
-  - Introduces GeoPandas + geographic data + spatial joins
+Initial balancing-authority and ISO/RTO boundary files from CommonGrid/HIFLD were inspected for ERCOT, PJM, CAISO, MISO, and SPP. All five market geometries contained topology errors, including self-intersections or degenerate polygon components.
+
+Automated geometry repair produced substantial footprint changes for several markets, especially CAISO and SPP, so those repaired boundaries were not used for data-center assignment.
+
+The next step is to identify a cleaner, independently sourced market-boundary dataset before performing the spatial join.
 
 
 ## *Phase 4 - Turn projected IT MW into actual grid load*
