@@ -38,7 +38,7 @@
 - Projected data-center MW + an actual siting methodology to study and critique
 
 
-### Phase 3 boundary-data note
+## *Phase 3 - Boundary Data Note*
 
 Initial balancing-authority and ISO/RTO boundary files from CommonGrid/HIFLD were inspected for ERCOT, PJM, CAISO, MISO, and SPP. All five market geometries contained topology errors, including self-intersections or degenerate polygon components.
 
