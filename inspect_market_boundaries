@@ -1,0 +1,101 @@
+from pathlib import Path
+
+import geopandas as gpd
+
+# Locate the existing boundary file relative to this project's root.
+# This script only reads and prints; it does not save or change any data.
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+BOUNDARY_PATH = (
+    PROJECT_ROOT / "data/raw/markets/balancing_authority_boundaries.geojson"
+)
+TARGET_CODES = ["ERCO", "PJM", "CISO", "MISO", "SWPP"]
+
+# Stop normally if the real boundary file has not been supplied.
+# Never create substitute boundaries or use state polygons as a fallback.
+if not BOUNDARY_PATH.exists():
+    print("Boundary file not found. Exact expected path:")
+    print(BOUNDARY_PATH)
+    raise SystemExit(0)
+
+# read_file loads attributes and geographic geometry into a GeoDataFrame.
+boundaries = gpd.read_file(BOUNDARY_PATH)
+
+# CRS (coordinate reference system) defines how coordinates map to Earth.
+# A missing CRS must be verified before any future reprojection or join.
+print("\nCRS:")
+print(boundaries.crs)
+if boundaries.crs is None:
+    print("WARNING: CRS is missing; geographic assignment is not ready.")
+
+# columns lists the attribute fields plus the active geometry column.
+print("\nColumns:")
+print(boundaries.columns)
+print("\nNumber of boundary rows:", len(boundaries))
+
+# We do not know the source's name/code field names in advance.
+# Print all attribute fields so no potential name/code identifier is hidden.
+# unique() lists distinct values; tolist() prevents truncated array output.
+attribute_columns = [
+    column for column in boundaries.columns
+    if column != boundaries.geometry.name
+]
+print("\nUnique attribute values (including BA names and codes):")
+for column in attribute_columns:
+    print(f"\n{column}:")
+    print(boundaries[column].unique().tolist())
+
+# geom_type describes the actual shapes, such as Polygon or MultiPolygon.
+print("\nGeometry types:")
+print(boundaries.geometry.geom_type.unique().tolist())
+
+# Missing means no geometry; empty means a geometry with no spatial content.
+# is_valid checks geometric consistency, not boundary accuracy or currency.
+missing = boundaries.geometry.isna()
+empty = boundaries.geometry.is_empty
+invalid = boundaries.geometry.notna() & ~boundaries.geometry.is_valid
+print("\nGeometry checks:")
+print("Missing geometries:", int(missing.sum()))
+print("Empty geometries:", int(empty.sum()))
+print("Invalid nonmissing geometries:", int(invalid.sum()))
+polygon_types = boundaries.geometry.geom_type.isin(["Polygon", "MultiPolygon"])
+print("Nonmissing non-polygon geometries:", int((~missing & ~polygon_types).sum()))
+if boundaries.empty or missing.any() or empty.any() or invalid.any() or not polygon_types.all():
+    print("WARNING: geometry checks do not pass for a polygon boundary dataset.")
+
+# Compare each attribute field against the EIA-930 codes.
+# Temporary strings ignore letter case and surrounding spaces for inspection.
+# These comparisons do NOT rename columns or change values in boundaries.
+# Exact matches avoid treating a longer name containing a code as proof.
+matching_fields = {code: [] for code in TARGET_CODES}
+field_scores = {}
+for column in attribute_columns:
+    comparison_values = boundaries[column].astype("string").str.strip().str.upper()
+    matched_codes = []
+    for code in TARGET_CODES:
+        if comparison_values.eq(code).any():
+            matching_fields[code].append(column)
+            matched_codes.append(code)
+    field_scores[column] = len(matched_codes)
+
+print("\nTarget balancing-authority code checks:")
+for code in TARGET_CODES:
+    if matching_fields[code]:
+        print(f"{code}: exact code found in {matching_fields[code]}")
+    else:
+        print(f"{code}: no exact code match; boundary presence is unconfirmed.")
+
+# Recommend a field only from observed matches, not from its name alone.
+# A tie is reported rather than silently selecting one field.
+print("\nBest apparent identifier for EIA-930 matching:")
+best_score = max(field_scores.values(), default=0)
+if best_score == 0:
+    print("No code field confirmed. Review the names and source documentation.")
+else:
+    best_fields = [
+        column for column, score in field_scores.items() if score == best_score
+    ]
+    print(f"Candidate field(s): {best_fields}; match {best_score} of 5 target codes.")
+    if len(best_fields) > 1:
+        print("Tie: verify which field is the documented balancing-authority code.")
+    print("Confirm the field's EIA-930 meaning, boundary source, and coverage date.")
+    print("Code matches alone do not establish geographic accuracy or completeness.")
